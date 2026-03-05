@@ -1,0 +1,1604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrowdShriek — Threat Detection Platform Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #06080d;
+  --bg-surface: #0b0f18;
+  --bg-card: #0e1320;
+  --border-dim: rgba(255,255,255,0.04);
+  --border-subtle: rgba(255,255,255,0.08);
+  --text-primary: #e8ecf4;
+  --text-secondary: #7a8599;
+  --text-dim: #3d4a5e;
+  --blue: #00b4ff;
+  --blue-glow: rgba(0,180,255,0.15);
+  --purple: #a855f7;
+  --purple-glow: rgba(168,85,247,0.15);
+  --amber: #f59e0b;
+  --amber-glow: rgba(245,158,11,0.12);
+  --red: #f43f5e;
+  --red-glow: rgba(244,63,94,0.12);
+  --green: #22d3ee;
+  --green-glow: rgba(34,211,238,0.12);
+  --emerald: #10b981;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grain overlay */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── Header ─── */
+.header {
+  padding: 28px 40px 20px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-dim);
+  position: relative;
+}
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 40px;
+  width: 200px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--red), transparent);
+}
+.logo {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.logo h1 {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 900;
+  font-size: 26px;
+  letter-spacing: -1px;
+  background: linear-gradient(135deg, var(--red), #ff6b6b, var(--amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.logo .tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
+.header-meta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: right;
+  line-height: 1.7;
+}
+
+/* ─── View Toggle ─── */
+.toggle-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 20px 40px 12px;
+}
+.toggle-bar {
+  display: flex;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.toggle-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  padding: 8px 24px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.toggle-btn.active {
+  background: rgba(244,63,94,0.12);
+  color: var(--red);
+  box-shadow: 0 0 20px rgba(244,63,94,0.08);
+}
+.toggle-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.03);
+}
+
+/* ─── Canvas container ─── */
+.canvas-wrap {
+  padding: 16px 40px;
+  position: relative;
+}
+#flowCanvas, #sysCanvas {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+}
+.hidden { display: none !important; }
+
+/* ─── Latency Spectrum ─── */
+.latency-panel {
+  padding: 16px 40px 8px;
+}
+.latency-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.latency-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-dim);
+}
+.spectrum-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+.spectrum-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 6px;
+  position: relative;
+}
+.spectrum-col.c-p10  { flex: 1; }
+.spectrum-col.c-p50  { flex: 2; }
+.spectrum-col.c-p99  { flex: 3; }
+.sp-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.sp-value {
+  font-family: 'Outfit', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.sp-unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  font-weight: 400;
+}
+.sp-bar-wrap {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  margin: 6px 0 4px;
+  position: relative;
+}
+.sp-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+}
+.sp-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+.sp-desc {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.3;
+}
+/* SLO marker */
+.sp-slo {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 3;
+}
+.sp-slo-line {
+  width: 1px;
+  flex: 1;
+  border-left: 1.5px dashed rgba(255,255,255,0.15);
+}
+.sp-slo-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 7px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  padding: 2px 4px;
+  background: var(--bg-card);
+  border-radius: 2px;
+  border: 1px solid var(--border-dim);
+}
+/* Colors */
+.c-p10 .sp-label, .c-p10 .sp-value { color: #22d3ee; }
+.c-p10 .sp-dot { background: #22d3ee; box-shadow: 0 0 8px rgba(34,211,238,0.5); }
+.c-p10 .sp-bar { background: linear-gradient(90deg, rgba(34,211,238,0.4), rgba(34,211,238,0.15)); }
+
+.c-p50 .sp-label, .c-p50 .sp-value { color: #00b4ff; }
+.c-p50 .sp-dot { background: #00b4ff; box-shadow: 0 0 8px rgba(0,180,255,0.5); }
+.c-p50 .sp-bar { background: linear-gradient(90deg, rgba(0,180,255,0.3), rgba(0,180,255,0.1)); }
+
+.c-p99 .sp-label, .c-p99 .sp-value { color: #f59e0b; }
+.c-p99 .sp-dot { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
+.c-p99 .sp-bar { background: linear-gradient(90deg, rgba(245,158,11,0.25), rgba(245,158,11,0.08)); }
+
+@media (max-width: 900px) {
+  .header { padding: 20px; flex-direction: column; gap: 12px; align-items: flex-start; }
+  .canvas-wrap, .latency-panel, .legend-bar { padding-left: 16px; padding-right: 16px; }
+  .sp-value { font-size: 15px; }
+  .sp-desc { display: none; }
+  .spectrum-col { padding: 0 3px; }
+}
+
+/* ─── Detail modal ─── */
+.modal-overlay {
+  position: fixed;
+  top:0;left:0;right:0;bottom:0;
+  background: rgba(6,8,13,0.75);
+  backdrop-filter: blur(6px);
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.modal-overlay.open {
+  opacity: 1;
+  pointer-events: all;
+}
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 500px;
+  width: 90%;
+  transform: translateY(10px);
+  transition: transform 0.25s;
+}
+.modal-overlay.open .modal-box { transform: translateY(0); }
+.modal-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.modal-layer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.modal-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-dim);
+}
+.modal-row:last-child { border-bottom: none; }
+.modal-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  min-width: 110px;
+  flex-shrink: 0;
+}
+.modal-val {
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.modal-close {
+  position: absolute;
+  top: 16px; right: 20px;
+  background: none; border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+.modal-close:hover { color: var(--text-primary); }
+
+/* ─── Legend bar ─── */
+.legend-bar {
+  padding: 0 40px 8px;
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.legend-swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+}
+.legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+@media (max-width: 900px) {
+  .header { padding: 20px; flex-direction: column; gap: 12px; align-items: flex-start; }
+  .canvas-wrap, .latency-panel, .legend-bar { padding-left: 16px; padding-right: 16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <h1>CrowdShriek</h1>
+    <span class="tag">architecture v0.2</span>
+  </div>
+  <div class="header-meta">
+    Real-Time Threat Detection Platform<br>
+    Sub-second · 3 PB/day · Knowledge Graph Enriched
+  </div>
+</div>
+
+<div class="latency-panel">
+  <div class="latency-title">Latency Distribution</div>
+  <div class="spectrum-row">
+    <!-- P10 -->
+    <div class="spectrum-col c-p10">
+      <div class="sp-label">P10</div>
+      <div class="sp-value">80–120 <span class="sp-unit">ms</span></div>
+      <div class="sp-bar-wrap">
+        <div class="sp-bar"></div>
+        <div class="sp-dot"></div>
+      </div>
+      <div class="sp-desc">Structured → fast parse → Tier 1</div>
+    </div>
+    <!-- P50 -->
+    <div class="spectrum-col c-p50">
+      <div class="sp-label">P50</div>
+      <div class="sp-value">250–400 <span class="sp-unit">ms</span></div>
+      <div class="sp-bar-wrap">
+        <div class="sp-bar"></div>
+        <div class="sp-dot"></div>
+      </div>
+      <div class="sp-desc">Heuristic → enrich → Tiers 1-3</div>
+    </div>
+    <!-- P99 with SLO marker -->
+    <div class="spectrum-col c-p99">
+      <div class="sp-label">P99</div>
+      <div class="sp-value">700–950 <span class="sp-unit">ms</span></div>
+      <div class="sp-bar-wrap">
+        <div class="sp-bar"></div>
+        <div class="sp-dot"></div>
+      </div>
+      <div class="sp-desc">LLM → graph → all 4 tiers</div>
+      <div class="sp-slo"><div class="sp-slo-tag">1s SLO</div><div class="sp-slo-line"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toggle-wrap">
+  <div class="toggle-bar">
+    <button class="toggle-btn active" id="btnFlow" onclick="switchView('flow')">Data Flow</button>
+    <button class="toggle-btn" id="btnSys" onclick="switchView('sys')">System Design</button>
+</div>
+</div>
+
+<div class="canvas-wrap">
+  <canvas id="flowCanvas" width="1400" height="920"></canvas>
+  <canvas id="sysCanvas" width="1400" height="920" class="hidden"></canvas>
+</div>
+
+<div class="modal-overlay" id="modal" onclick="closeModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-layer" id="modalLayer"></div>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONFIG & DATA
+// ═══════════════════════════════════════════════════════════
+const COLORS = {
+  blue: '#00b4ff', purple: '#a855f7', amber: '#f59e0b',
+  red: '#f43f5e', green: '#22d3ee', emerald: '#10b981',
+  bgSurface: '#0b0f18', bgCard: '#0e1320',
+  borderDim: 'rgba(255,255,255,0.04)', borderSubtle: 'rgba(255,255,255,0.08)',
+  textPrimary: '#e8ecf4', textSecondary: '#7a8599', textDim: '#3d4a5e'
+};
+
+function glow(color, a=0.15){ return 'rgba('+parseInt(color.slice(1,3),16)+','+parseInt(color.slice(3,5),16)+','+parseInt(color.slice(5,7),16)+','+a+')'; }
+
+const DETAIL = {
+  structured: { title:'Structured Event Sources', layer:'INGESTION', color:COLORS.blue, rows:[
+    ['Type','Known schemas · established event types'],
+    ['Examples','EDR telemetry, firewall logs, auth events'],
+    ['Volume','~80% of total ingestion'],
+    ['Format','Schema-registered, versioned via Confluent Schema Registry']
+  ]},
+  unstructured: { title:'Unstructured Event Sources', layer:'INGESTION', color:COLORS.blue, rows:[
+    ['Type','Heterogeneous · multi-format'],
+    ['Examples','Salesforce, ServiceNow, Atlassian, Slack, email'],
+    ['Volume','~20% of total ingestion'],
+    ['Formats','JSON, XML, free text, mixed payloads']
+  ]},
+  kafka: { title:'Apache Kafka', layer:'INGESTION', color:COLORS.blue, rows:[
+    ['Role','Landing topic for all accepted events'],
+    ['Throughput','~35 GB/s sustained'],
+    ['Partitioning','By customer_id for ordering & locality'],
+    ['Routing','Multi-cluster deployment (regional details omitted)'],
+    ['Schema Registry','Enforced for structured events']
+  ]},
+  receiver: { title:'Receiver Server', layer:'INGESTION', color:COLORS.blue, rows:[
+    ['Role','Smart front-door for all incoming events'],
+    ['Authentication','mTLS + API key validation per source'],
+    ['Rate limiting','Per-tenant token-bucket with burst allowance'],
+    ['Structured','Schema check via registry'],
+    ['Unstructured','Accept raw payload + source metadata tags'],
+    ['Persistence','Writes accepted events to Kafka landing topic'],
+    ['Rejection','Malformed / unauthorized events dropped with metrics']
+  ]},
+  deterministic: { title:'Deterministic Parsers', layer:'NORMALIZATION', color:COLORS.purple, rows:[
+    ['Traffic','~80% of all events'],
+    ['Latency','< 1ms'],
+    ['Method','Schema mapping → normalized event envelope'],
+    ['Use when','Known integration with stable schema'],
+    ['Output','High-confidence normalized envelope']
+  ]},
+  heuristic: { title:'Regex + Heuristic Extractors', layer:'NORMALIZATION', color:COLORS.purple, rows:[
+    ['Traffic','~10-12% of events'],
+    ['Latency','< 5ms'],
+    ['Method','Field-name matching, structural analysis'],
+    ['Use when','Semi-structured, recognizable patterns'],
+    ['Output','Medium-confidence normalized envelope']
+  ]},
+  prefilter: { title:'Pre-Filter (Bloom + Fast NLP)', layer:'NORMALIZATION', color:COLORS.purple, rows:[
+    ['Problem','~7 GB/s unstructured = ~7M msgs/sec — too much for LLM'],
+    ['Stage 1','Bloom filter check against threat intel IOCs (< 0.1ms)'],
+    ['Stage 2','Lightweight NLP classifier — intent/risk scoring (< 1ms)'],
+    ['Pass rate','Small fraction of unstructured events need full LLM parse'],
+    ['Drop','Safe/routine events get fast-path partial normalization'],
+    ['Result','Reduces LLM load by an order of magnitude']
+  ]},
+  llm: { title:'Distilled LLM (1-3B params)', layer:'NORMALIZATION', color:COLORS.purple, rows:[
+    ['Traffic','Filtered unstructured events (post pre-filter)'],
+    ['Latency','< 30ms (1-3B params, quantized)'],
+    ['Method','Semantic extraction for free-text payloads'],
+    ['Use when','Pre-filter flags as needing deep semantic parse'],
+    ['Serving','Batched inference · optimized for low latency'],
+    ['Confidence routing','High → fast path · Low → async re-analysis']
+  ]},
+  hotgraph: { title:'Hot Graph — Memgraph', layer:'ENRICHMENT', color:COLORS.amber, rows:[
+    ['Technology','Memgraph — in-memory graph for hot window'],
+    ['Latency','~10-30ms for 1-2 hop traversal'],
+    ['Scope','Last 24-72h of entity state per tenant'],
+    ['Sharding','By customer_id · 3x replicated'],
+    ['Nodes','Users, Devices, IPs, Domains, Files, Roles'],
+    ['Edges','OWNS, HAS_ROLE, CONNECTS_TO, FROM, MEMBER_OF'],
+    ['Updates','Micro-batched writes from stream'],
+    ['Query language','Cypher (compatible with Neo4j)']
+  ]},
+  warmgraph: { title:'Warm Graph — Neo4j', layer:'ENRICHMENT', color:COLORS.amber, rows:[
+    ['Technology','Neo4j — disk-based with page cache'],
+    ['Scope','Full historical entity graph'],
+    ['Deployment','Causal clustering + read replicas'],
+    ['Sharding','By customer_id via Neo4j Fabric'],
+    ['Updates','Micro-batched writes from stream'],
+    ['Use','Deep investigations, async enrichment'],
+    ['Query language','Cypher (same as Memgraph — one language across tiers)']
+  ]},
+  tier1: { title:'Tier 1: Rule-Based / Signature', layer:'DETECTION', color:COLORS.red, rows:[
+    ['Latency','Microseconds'],
+    ['Method','Stateless pattern matching'],
+    ['Examples','Known phishing domains, blocklisted IPs'],
+    ['Tech','Apache Flink stateless operators'],
+    ['Catches','Known threats · high precision']
+  ]},
+  tier2: { title:'Tier 2: Stateful CEP', layer:'DETECTION', color:COLORS.red, rows:[
+    ['Latency','Microseconds'],
+    ['Method','Temporal event pattern matching'],
+    ['Patterns','Golden labels + synthetic pattern generation'],
+    ['Example','Email → click → download within 90s window'],
+    ['Tech','Apache Flink CEP · event-time processing'],
+    ['State','Keyed by customer_id + entity_id']
+  ]},
+  tier3: { title:'Tier 3: ML / Anomaly', layer:'DETECTION', color:COLORS.red, rows:[
+    ['Latency','~10ms inference'],
+    ['Method','Deviation from per-entity baselines'],
+    ['Models','Specialist small models for composability'],
+    ['Training','Offline on last 30-90 days of activity'],
+    ['Baseline','Compact feature vector stored in Redis'],
+    ['Serving','GPU inference (ONNX/TensorRT) · CPU fallback'],
+    ['Example','User never downloads .exe → first .exe flagged'],
+    ['Features','Derived from history + graph context']
+  ]},
+  tier4: { title:'Tier 4: Graph-Based Detection', layer:'DETECTION', color:COLORS.red, rows:[
+    ['Latency','~10-30ms'],
+    ['Method','Structural anomalies in entity relationships'],
+    ['Realtime','Incremental/dynamic subgraph updates'],
+    ['Async','Full-graph analytics on minute+ cadence'],
+    ['Example','New path to sensitive resource · coordinated clicks'],
+    ['Catches','Lateral movement, coordinated attacks']
+  ]},
+  fusion: { title:'Signal Fusion Layer', layer:'DETECTION', color:COLORS.red, rows:[
+    ['Method','Weighted scoring / small ML model'],
+    ['Input','Scored signals from all 4 detection tiers'],
+    ['Output','Final threat decision + score'],
+    ['Threshold','Configurable per customer'],
+    ['Key concern','0.01% FP at scale = millions of false alerts/day']
+  ]},
+  action: { title:'Action Queue', layer:'ACTION', color:COLORS.emerald, rows:[
+    ['Input','Threats above fusion threshold'],
+    ['Outputs','Block, quarantine, revoke session, alert SOC'],
+    ['Scope','Outside this system\'s design boundary']
+  ]},
+  cold: { title:'Cold Storage', layer:'ACTION', color:COLORS.emerald, rows:[
+    ['Format','Parquet columnar on S3/GCS'],
+    ['Contents','Threat detections + raw logs'],
+    ['Purpose','Forensics, compliance, model retraining'],
+    ['Volume','Full 3 PB/day raw events retained'],
+    ['Retention','Per customer compliance requirements']
+  ]},
+  // System design nodes
+  'sys-kafka':{ title:'Apache Kafka Cluster', layer:'TRANSPORT', color:COLORS.blue, rows:[
+    ['Role','Primary event bus · all inter-service communication'],
+    ['Deployment','Multi-cluster for scale · regional details omitted'],
+    ['Topics','raw-events, normalized-events, enriched-events, detections, actions'],
+    ['Partitions','Hundreds per topic · keyed by customer_id'],
+    ['Retention','Short-lived topics · long-term in S3/GCS data lake']
+  ]},
+  'sys-flink':{ title:'Apache Flink Cluster', layer:'COMPUTE', color:COLORS.purple, rows:[
+    ['Role','Stream processing for normalization, enrichment, detection'],
+    ['Jobs','Normalization, Enrichment, CEP, Fusion'],
+    ['Parallelism','Scaled per-job based on partition count'],
+    ['State','Event-time windows + keyed state per customer']
+  ]},
+  'sys-gpu':{ title:'GPU Inference Fleet', layer:'ML INFRA', color:COLORS.red, rows:[
+    ['Role','Serves distilled LLM + Tier 3 ML models'],
+    ['Serving','Quantized inference optimized for low latency'],
+    ['Framework','ONNX / TensorRT model runtime'],
+    ['Scaling','Auto-scale on inference queue depth'],
+    ['Fallback','CPU path for lightweight models']
+  ]},
+  'sys-neo4j':{ title:'Graph Database', layer:'DATABASE', color:COLORS.amber, rows:[
+    ['Hot tier','Memgraph — in-memory, 24-72h window'],
+    ['Warm tier','Neo4j — disk-based, full history'],
+    ['Sharding','By customer_id across both tiers'],
+    ['Replication','3x per shard (hot) + read replicas (warm)'],
+    ['Clustering','Neo4j causal clustering + Fabric routing'],
+    ['Updates','Micro-batched writes from stream'],
+    ['Query language','Cypher across both tiers']
+  ]},
+  'sys-redis':{ title:'Redis Cluster', layer:'DATABASE', color:COLORS.amber, rows:[
+    ['Role','Feature store for ML baselines'],
+    ['Data','Per-entity baseline vectors (30-90 days history)'],
+    ['Updates','Offline training writes + online reads'],
+    ['Use','Tier 3 anomaly detection']
+  ]},
+  'sys-s3':{ title:'S3 / GCS Cold Storage', layer:'DATABASE', color:COLORS.amber, rows:[
+    ['Role','Data lake for raw logs + detections'],
+    ['Format','Parquet, partitioned by date + customer_id'],
+    ['Writes','Batch writes for cost efficiency'],
+    ['Volume','3 PB/day sustained writes']
+  ]},
+  'sys-schema':{ title:'Schema Registry', layer:'SERVICE', color:COLORS.purple, rows:[
+    ['Role','Enforces event schemas for structured sources'],
+    ['Tech','Confluent Schema Registry (Avro / Protobuf)'],
+    ['Versioning','Full backward compatibility enforcement'],
+    ['Integration','Kafka producers validate before publish']
+  ]}
+};
+
+// ═══════════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════════
+function openModal(id){
+  const d = DETAIL[id];
+  if(!d) return;
+  document.getElementById('modalTitle').textContent = d.title;
+  const ml = document.getElementById('modalLayer');
+  ml.textContent = d.layer;
+  ml.style.color = d.color;
+  let html = '';
+  d.rows.forEach(([l,v])=>{
+    html += `<div class="modal-row"><div class="modal-label" style="color:${d.color}">${l}</div><div class="modal-val">${v}</div></div>`;
+  });
+  document.getElementById('modalContent').innerHTML = html;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('modal').classList.remove('open'); }
+
+// ═══════════════════════════════════════════════════════════
+// VIEW SWITCHING
+// ═══════════════════════════════════════════════════════════
+let currentView = 'flow';
+function switchView(v){
+  currentView = v;
+  document.getElementById('flowCanvas').classList.toggle('hidden', v!=='flow');
+  document.getElementById('sysCanvas').classList.toggle('hidden', v!=='sys');
+  document.getElementById('btnFlow').classList.toggle('active', v==='flow');
+  document.getElementById('btnSys').classList.toggle('active', v==='sys');
+}
+
+// ═══════════════════════════════════════════════════════════
+// DRAWING UTILITIES
+// ═══════════════════════════════════════════════════════════
+function dpr(canvas){
+  const r = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * r;
+  canvas.height = rect.height * r;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(r, r);
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  return ctx;
+}
+
+function roundRect(ctx, x, y, w, h, r, fill, stroke, strokeW=1){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+  if(fill){ ctx.fillStyle=fill; ctx.fill(); }
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=strokeW; ctx.stroke(); }
+}
+
+function diamond(ctx, cx, cy, size, fill, stroke){
+  const h = size/2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy-h); ctx.lineTo(cx+h, cy); ctx.lineTo(cx, cy+h); ctx.lineTo(cx-h, cy); ctx.closePath();
+  if(fill){ ctx.fillStyle=fill; ctx.fill(); }
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=1.5; ctx.stroke(); }
+}
+
+function arrow(ctx, x1, y1, x2, y2, color, opts={}){
+  const {dashed, thick, label, labelOffX=0, labelOffY=0} = opts;
+  const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy);
+  const ux=dx/len, uy=dy/len;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = thick ? 2 : 1.2;
+  if(dashed) ctx.setLineDash([5,4]);
+  ctx.beginPath();
+  ctx.moveTo(x1,y1);
+  ctx.lineTo(x2-ux*6, y2-uy*6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // arrowhead
+  const ax=x2-ux*8, ay=y2-uy*8;
+  const px=-uy*3.5, py=ux*3.5;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(ax+px, ay+py);
+  ctx.lineTo(ax-px, ay-py);
+  ctx.closePath();
+  ctx.fill();
+  if(label){
+    const mx=(x1+x2)/2+labelOffX, my=(y1+y2)/2+labelOffY;
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // background
+    const tw = ctx.measureText(label).width+6;
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.fillRect(mx-tw/2, my-7, tw, 14);
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText(label, mx, my);
+  }
+  ctx.restore();
+}
+
+function layerBand(ctx, y, h, color, title, subtitle, W){
+  ctx.fillStyle = glow(color, 0.04);
+  ctx.fillRect(0, y, W, h);
+  ctx.strokeStyle = glow(color, 0.15);
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  ctx.font = '700 10px "IBM Plex Mono", monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.fillText(title, 20, y+18);
+  ctx.font = '400 9px "Outfit", sans-serif';
+  ctx.fillStyle = COLORS.textDim;
+  ctx.fillText(subtitle, 20, y+32);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PARTICLE SYSTEM — with fan-out at event bus and fan-in at fusion
+// ═══════════════════════════════════════════════════════════
+
+// Simple particle that follows a path
+class Particle {
+  constructor(path, color, speed, delay, trailLen){
+    this.path = path;
+    this.color = color;
+    this.speed = speed;
+    this.delay = delay;
+    this.t = -delay;
+    this.segIdx = 0;
+    this.segT = 0;
+    this.alive = true;
+    this.trail = [];
+    this.trailLen = trailLen || 12;
+    this.headSize = 6;
+  }
+  update(dt){
+    this.t += dt;
+    if(this.t < 0) return;
+    if(this.segIdx >= this.path.length - 1){ this.alive = false; return; }
+    const a = this.path[this.segIdx], b = this.path[this.segIdx+1];
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const len = Math.sqrt(dx*dx+dy*dy);
+    if(len < 0.1){ this.segIdx++; return; }
+    this.segT += (this.speed * dt) / len;
+    if(this.segT >= 1){
+      this.segT = 0;
+      this.segIdx++;
+      if(this.segIdx >= this.path.length-1){ this.alive=false; return; }
+    }
+    const sa = this.path[this.segIdx], sb = this.path[this.segIdx+1];
+    const cx = sa.x + (sb.x - sa.x)*this.segT;
+    const cy = sa.y + (sb.y - sa.y)*this.segT;
+    this.trail.push({x:cx,y:cy});
+    if(this.trail.length > this.trailLen) this.trail.shift();
+  }
+  draw(ctx){
+    if(this.t < 0 || !this.alive || this.trail.length === 0) return;
+    for(let i=0;i<this.trail.length;i++){
+      const p = this.trail[i];
+      const a = (i/this.trail.length)*0.6;
+      const r = 1 + (i/this.trail.length)*1.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI*2);
+      ctx.fillStyle = this.color.replace(')', ','+a+')').replace('rgb','rgba');
+      ctx.fill();
+    }
+    const h = this.trail[this.trail.length-1];
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, this.headSize, 0, Math.PI*2);
+    const g = ctx.createRadialGradient(h.x,h.y,0,h.x,h.y,this.headSize);
+    g.addColorStop(0, this.color.replace(')', ',0.5)').replace('rgb','rgba'));
+    g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+}
+
+// Cascading detection: event enters T1, escalates right if no match, all paths drop into fusion
+const TIER_CASCADE = [
+  { enter:{x:215,y:554}, exit:{x:290,y:554}, score:{x:215,y:578}, fusionPt:{x:400,y:610} },
+  { enter:{x:330,y:554}, exit:{x:480,y:554}, score:{x:405,y:578}, fusionPt:{x:450,y:610} },
+  { enter:{x:520,y:554}, exit:{x:670,y:554}, score:{x:595,y:578}, fusionPt:{x:540,y:610} },
+  { enter:{x:710,y:554}, exit:{x:860,y:554}, score:{x:785,y:578}, fusionPt:{x:620,y:610} },
+];
+const FUSION_END = {x:500, y:635};
+const ACTION_PATH = [{x:500,y:658},{x:500,y:685},{x:390,y:735}]; // Action queue path (thresholded threats)
+const COLD_PATH = [{x:500,y:635},{x:560,y:658},{x:680,y:735}]; // Cold storage path (all events)
+
+class CascadeGroup {
+  constructor(prePath, color, speed, delay, stopTier){
+    this.color = color;
+    this.speed = speed;
+    this.stopTier = stopTier; // 0-3 = threat at tier N, 4 = no threat
+    this.triggerAction = stopTier < 4;
+    this.phase = 'pre';
+    this.alive = true;
+    this.main = new Particle(prePath, color, speed, delay);
+    this.main.headSize = 5;
+    // Cascade through tiers
+    const pts = [];
+    const maxT = Math.min(this.stopTier, 3);
+    for(let i = 0; i <= maxT; i++){
+      pts.push(TIER_CASCADE[i].enter);
+      pts.push(TIER_CASCADE[i].exit);
+    }
+    this.cascade = new Particle(pts, color, speed * 0.7, 0, 8);
+    this.cascade.headSize = 4;
+    // Score drop to fusion (all events)
+    const scoreIdx = Math.min(this.stopTier, 3);
+    const tc = TIER_CASCADE[scoreIdx];
+    this.scoreDrop = new Particle([tc.score, tc.fusionPt, FUSION_END], color, speed * 0.8, 0, 6);
+    this.scoreDrop.headSize = 4;
+    this.actionDrop = this.triggerAction ? new Particle(ACTION_PATH, color, speed, 0, 6) : null;
+    if(this.actionDrop) this.actionDrop.headSize = 4;
+    this.coldDrop = new Particle(COLD_PATH, color, speed * 0.9, 0, 6);
+    this.coldDrop.headSize = 4;
+  }
+  update(dt){
+    if(this.phase === 'done'){ this.alive = false; return; }
+    if(this.phase === 'pre'){
+      this.main.update(dt);
+      if(!this.main.alive) this.phase = 'cascade';
+    }
+    if(this.phase === 'cascade'){
+      this.cascade.update(dt);
+      if(!this.cascade.alive){
+        this.phase = 'score';
+      }
+    }
+    if(this.phase === 'score'){
+      this.scoreDrop.update(dt);
+      if(!this.scoreDrop.alive) this.phase = 'post';
+    }
+    if(this.phase === 'post'){
+      this.coldDrop.update(dt);
+      if(this.actionDrop) this.actionDrop.update(dt);
+      if(!this.coldDrop.alive && (!this.actionDrop || !this.actionDrop.alive)) this.phase = 'done';
+    }
+  }
+  draw(ctx){
+    if(this.phase === 'pre') this.main.draw(ctx);
+    if(this.phase === 'cascade') this.cascade.draw(ctx);
+    if(this.phase === 'score') this.scoreDrop.draw(ctx);
+    if(this.phase === 'post'){
+      if(this.coldDrop) this.coldDrop.draw(ctx);
+      if(this.actionDrop) this.actionDrop.draw(ctx);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FLOW DIAGRAM — CLICKABLE REGIONS
+// ═══════════════════════════════════════════════════════════
+let flowRegions = [];
+function addFlowRegion(id, x, y, w, h){ flowRegions.push({id,x,y,w,h}); }
+
+// ═══════════════════════════════════════════════════════════
+// DRAW FLOW VIEW
+// ═══════════════════════════════════════════════════════════
+function drawFlowStatic(ctx, W, H){
+  ctx.clearRect(0,0,W,H);
+  flowRegions = [];
+
+  // Layer bands
+  layerBand(ctx, 0, 60, COLORS.emerald, 'EXTERNAL SOURCES', 'Structured & unstructured event producers', W);
+  layerBand(ctx, 60, 145, COLORS.blue, 'INGESTION LAYER', '~35 GB/s sustained · 3 PB/day · Receiver → Kafka', W);
+  layerBand(ctx, 205, 170, COLORS.purple, 'NORMALIZATION LAYER', 'Tiered parsing · pre-filter + distilled LLM for unstructured', W);
+  layerBand(ctx, 375, 100, COLORS.amber, 'ENRICHMENT LAYER', 'Knowledge Graph · 1-2 hop traversal · ~10-30ms', W);
+  layerBand(ctx, 475, 270, COLORS.red, 'DETECTION LAYER', 'Multi-model · cascading escalation · sub-second', W);
+  layerBand(ctx, 745, 130, COLORS.emerald, 'ACTION LAYER', 'Action queue (thresholded) · cold archive (all events)', W);
+
+  const nodeFont = '600 11px "IBM Plex Mono", monospace';
+  const subFont = '400 9px "Outfit", sans-serif';
+  const node = (id,label,sub,x,y,w,h,color,dsh)=>{
+    roundRect(ctx, x,y,w,h, 6, glow(color,0.06), glow(color,0.3), dsh?1:1.5);
+    if(dsh){ ctx.setLineDash([4,3]); roundRect(ctx,x,y,w,h,6,null,glow(color,0.3)); ctx.setLineDash([]); }
+    ctx.font = nodeFont; ctx.fillStyle = color; ctx.textAlign='center';
+    ctx.fillText(label, x+w/2, y + (sub ? h/2 - 5 : h/2 + 1));
+    if(sub){ ctx.font=subFont; ctx.fillStyle=COLORS.textDim; ctx.fillText(sub, x+w/2, y+h/2+10); }
+    addFlowRegion(id, x, y, w, h);
+  };
+
+  // ── EXTERNAL SOURCES ──
+  node('structured','Structured Sources','EDR · Firewall · Auth', 230, 18, 170, 34, COLORS.emerald);
+  node('unstructured','Unstructured Sources','SF · SNOW · Atlassian · Email', 490, 18, 180, 34, COLORS.emerald);
+
+  // ── INGESTION ──
+  node('receiver','Receiver Server','Auth · rate-limit · validate · persist', 310, 80, 250, 38, COLORS.blue);
+  node('kafka','Apache Kafka','Landing topic · partitioned by customer_id', 330, 135, 210, 36, COLORS.blue);
+  // Sources → Receiver
+  arrow(ctx, 350, 52, 400, 80, glow(COLORS.emerald,0.5), {thick:true});
+  arrow(ctx, 540, 52, 475, 80, glow(COLORS.emerald,0.5), {thick:true});
+  // Receiver → Kafka
+  arrow(ctx, 435, 118, 435, 135, glow(COLORS.blue,0.5), {thick:true});
+
+  // ── NORMALIZATION ──
+  // router diamond
+  diamond(ctx, 680, 240, 40, glow(COLORS.purple,0.1), glow(COLORS.purple,0.5));
+  ctx.font='700 8px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.purple; ctx.textAlign='center';
+  ctx.fillText('ROUTE', 680, 242);
+  arrow(ctx, 435, 171, 680, 220, glow(COLORS.blue,0.5), {thick:true, label:'events', labelOffY:-8});
+
+  node('deterministic','Deterministic Parsers','~80% · < 1ms', 350, 275, 180, 42, COLORS.purple);
+  node('heuristic','Regex + Heuristics','~10-12% · < 5ms', 570, 275, 170, 42, COLORS.purple);
+
+  // Unstructured path: Pre-Filter → LLM pipeline
+  node('prefilter','Pre-Filter','Bloom + NLP · < 1ms', 780, 225, 130, 34, COLORS.purple);
+  node('llm','Distilled LLM (1-3B)','filtered · < 30ms', 780, 279, 130, 34, COLORS.purple);
+
+  arrow(ctx, 660, 243, 530, 275, COLORS.purple, {label:'known schema', labelOffX:-10, labelOffY:-6});
+  arrow(ctx, 680, 260, 655, 275, COLORS.purple, {label:'semi-struct', labelOffX:-30, labelOffY:4});
+  arrow(ctx, 700, 240, 780, 240, COLORS.purple, {label:'unstructured ~20%', labelOffX:0, labelOffY:-10});
+
+  // Pre-filter → LLM
+  arrow(ctx, 845, 259, 845, 279, COLORS.purple, {});
+  // Pass rate label
+  ctx.font='400 7px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.purple; ctx.textAlign='left';
+  ctx.fillText('subset', 852, 273);
+  ctx.fillText('to LLM', 852, 282);
+
+  // Dropped events annotation
+  arrow(ctx, 910, 242, 950, 242, glow(COLORS.purple,0.3), {dashed:true});
+  ctx.font='400 7px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.textDim; ctx.textAlign='left';
+  ctx.fillText('fast-path', 955, 237);
+  ctx.fillText('(routine / safe)', 955, 247);
+
+  // Confidence routing diamond
+  diamond(ctx, 845, 333, 28, glow(COLORS.amber,0.1), glow(COLORS.amber,0.5));
+  ctx.font='700 7px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.amber; ctx.textAlign='center';
+  ctx.fillText('CONF', 845, 335);
+  arrow(ctx, 845, 313, 845, 319, COLORS.purple);
+
+  // High confidence → normalized envelope
+  arrow(ctx, 831, 337, 720, 355, COLORS.amber, {label:'high conf', labelOffX:-5, labelOffY:-8});
+
+  // Low confidence → async re-analysis box
+  arrow(ctx, 859, 337, 930, 350, COLORS.amber, {dashed:true, label:'low conf', labelOffX:5, labelOffY:-8});
+  roundRect(ctx, 920, 353, 140, 26, 5, glow(COLORS.amber,0.06), glow(COLORS.amber,0.2), 1);
+  ctx.font='500 8px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.amber; ctx.textAlign='center';
+  ctx.fillText('Async re-analysis', 990, 364);
+  ctx.font='400 7px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.textDim;
+  ctx.fillText('low-confidence queue', 990, 375);
+
+  // Normalized envelope merge bar
+  roundRect(ctx, 400, 353, 280, 20, 4, glow(COLORS.purple,0.1), glow(COLORS.purple,0.25));
+  ctx.font='600 9px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.purple; ctx.textAlign='center';
+  ctx.fillText('Normalized Event Envelope', 540, 365);
+
+  arrow(ctx, 440, 317, 480, 353, COLORS.purple);
+  arrow(ctx, 655, 317, 640, 353, COLORS.purple);
+
+  // ── ENRICHMENT ──
+  arrow(ctx, 540, 373, 540, 400, COLORS.purple, {thick:true});
+  node('hotgraph','Hot Graph (Memgraph)','In-memory · 24-72h · sharded', 340, 400, 210, 48, COLORS.amber);
+  node('warmgraph','Warm Graph (Neo4j)','Disk-based · full history', 620, 400, 170, 48, COLORS.amber, true);
+  arrow(ctx, 550, 424, 620, 424, COLORS.amber, {dashed:true, label:'deep lookup', labelOffY:-9});
+
+  // graph annotations
+  ctx.font='400 8.5px "IBM Plex Mono",monospace'; ctx.fillStyle=glow(COLORS.amber,0.6); ctx.textAlign='center';
+  ctx.fillText('User→Role, Domain→Reputation, Device→History', 480, 458);
+
+  // graph mutation arrow
+  arrow(ctx, 300, 171, 300, 424, glow(COLORS.amber,0.25), {dashed:true});
+  arrow(ctx, 300, 424, 340, 424, glow(COLORS.amber,0.25), {dashed:true});
+  ctx.font='400 8px "IBM Plex Mono",monospace'; ctx.fillStyle=glow(COLORS.amber,0.45); ctx.textAlign='center';
+  ctx.fillText('micro-batched updates', 300, 310);
+
+  // ── DETECTION ──
+  arrow(ctx, 480, 463, 215, 530, COLORS.amber, {thick:true});
+
+  // Tiers in a horizontal cascade
+  node('tier1','Tier 1: Rules','μs · signatures', 140, 530, 150, 48, COLORS.red);
+  node('tier2','Tier 2: CEP','μs · sequences', 330, 530, 150, 48, COLORS.red);
+  node('tier3','Tier 3: ML','~10ms · anomaly', 520, 530, 150, 48, COLORS.red);
+  node('tier4','Tier 4: Graph','~10ms · structural', 710, 530, 150, 48, COLORS.red);
+
+  // Cascade arrows: solid, Tier 1 → 2 → 3 → 4
+  arrow(ctx, 290, 554, 330, 554, COLORS.red, {thick:true});
+  arrow(ctx, 480, 554, 520, 554, COLORS.red, {thick:true});
+  arrow(ctx, 670, 554, 710, 554, COLORS.red, {thick:true});
+
+  // Escalation labels
+  ctx.font='400 7.5px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.textDim; ctx.textAlign='center';
+  ctx.fillText('no match', 310, 548);
+  ctx.fillText('no match', 500, 548);
+  ctx.fillText('no match', 690, 548);
+
+  // Tier 4 → graph queries via Memgraph triggers
+  arrow(ctx, 785, 530, 785, 505, glow(COLORS.red,0.35), {dashed:true});
+  arrow(ctx, 785, 505, 960, 505, glow(COLORS.red,0.35), {dashed:true});
+  arrow(ctx, 960, 505, 960, 410, glow(COLORS.red,0.35), {dashed:true});
+  arrow(ctx, 960, 410, 790, 410, glow(COLORS.red,0.35), {dashed:true});
+  ctx.font='400 8px "IBM Plex Mono",monospace'; ctx.fillStyle=glow(COLORS.red,0.5); ctx.textAlign='center';
+  ctx.fillText('graph queries', 880, 498);
+
+  // Score arrows down to Fusion (all tiers emit scores)
+  node('fusion','Signal Fusion','weighted scoring · final decision', 330, 610, 340, 48, COLORS.red);
+  arrow(ctx, 215, 578, 400, 610, COLORS.red, {label:'score'});
+  arrow(ctx, 405, 578, 450, 610, COLORS.red, {label:'score'});
+  arrow(ctx, 595, 578, 540, 610, COLORS.red, {label:'score'});
+  arrow(ctx, 785, 578, 620, 610, COLORS.red, {label:'score'});
+
+  // ── ACTION ──
+  diamond(ctx, 500, 685, 38, glow(COLORS.emerald,0.1), glow(COLORS.emerald,0.5));
+  ctx.font='700 8px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.emerald; ctx.textAlign='center';
+  ctx.fillText('THR', 500, 687);
+  arrow(ctx, 500, 658, 500, 666, COLORS.red, {thick:true});
+
+  node('action','Action Queue','Block · Quarantine · Alert SOC', 280, 735, 220, 50, COLORS.emerald);
+  node('cold','Cold Storage (S3/GCS)','Parquet · 3 PB/day', 570, 735, 220, 50, COLORS.emerald);
+
+  arrow(ctx, 482, 691, 390, 735, COLORS.emerald, {thick:true, label:'threat ≥ threshold', labelOffX:-20, labelOffY:-4});
+  arrow(ctx, 560, 658, 680, 735, COLORS.emerald, {label:'all events', labelOffX:20, labelOffY:-4});
+
+  ctx.font='500 9px "IBM Plex Mono",monospace'; ctx.fillStyle=glow(COLORS.emerald,0.5); ctx.textAlign='center';
+  ctx.fillText('→ Remediation workflows (out of scope)', 390, 805);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PARTICLE PATHS — split into pre-bus and post-fusion segments
+// ═══════════════════════════════════════════════════════════
+const FLOW_PATHS = [
+  { color:'rgb(0,180,255)',
+    pre: [
+      {x:350,y:35},{x:400,y:80},{x:435,y:118},{x:435,y:135},{x:435,y:171},
+      {x:680,y:220},{x:680,y:240},
+      {x:530,y:275},{x:440,y:317},{x:480,y:355},
+      {x:540,y:373},{x:540,y:400},{x:445,y:463},{x:215,y:530}
+    ]
+  },
+  { color:'rgb(0,180,255)',
+    pre: [
+      {x:540,y:35},{x:475,y:80},{x:435,y:118},{x:435,y:135},{x:435,y:171},
+      {x:680,y:220},{x:680,y:240},
+      {x:655,y:275},{x:655,y:317},{x:640,y:355},
+      {x:540,y:373},{x:540,y:400},{x:445,y:463},{x:215,y:530}
+    ]
+  },
+  { color:'rgb(0,180,255)',
+    pre: [
+      {x:540,y:35},{x:475,y:80},{x:435,y:118},{x:435,y:135},{x:435,y:171},
+      {x:680,y:220},{x:680,y:240},
+      {x:780,y:240},{x:845,y:259},{x:845,y:279},{x:845,y:313},{x:845,y:333},
+      {x:720,y:355},{x:540,y:373},{x:540,y:400},{x:445,y:463},{x:215,y:530}
+    ]
+  },
+];
+
+// Weighted: half of events are threats, remaining are benign
+// T1: 25%, T2: 12.5%, T3: 7.5%, T4: 5%, no threat: 50%
+function pickStopTier(){
+  const r = Math.random();
+  if(r < 0.25) return 0;
+  if(r < 0.375) return 1;
+  if(r < 0.45) return 2;
+  if(r < 0.50) return 3;
+  return 4;
+}
+
+let particles = [];
+let lastTime = 0;
+
+function spawnGroup(p, pi, delay){
+  const speed = 180 + pi * 20;
+  const stopTier = pickStopTier();
+  particles.push(new CascadeGroup(p.pre, p.color, speed, delay, stopTier));
+}
+
+function spawnParticles(){
+  FLOW_PATHS.forEach((p, pi) => {
+    spawnGroup(p, pi, pi * 2.0);
+    spawnGroup(p, pi + FLOW_PATHS.length, pi * 2.0 + 0.6);
+  });
+}
+
+function respawnLoop(){
+  setInterval(()=>{
+    FLOW_PATHS.forEach((p, pi) => {
+      spawnGroup(p, pi, pi * 0.8);
+      spawnGroup(p, pi + FLOW_PATHS.length, pi * 0.8 + 0.4);
+    });
+    particles = particles.filter(p => p.alive);
+  }, 6000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SYSTEM DESIGN VIEW
+// ═══════════════════════════════════════════════════════════
+let sysRegions = [];
+
+// ── Shape primitives for system design ──
+
+function drawCylinder(ctx, x, y, w, h, color, fillColor){
+  // Database cylinder shape
+  const ew = w, eh = 14; // ellipse dimensions for top/bottom caps
+  const bodyTop = y + eh/2;
+  const bodyBot = y + h - eh/2;
+  // body
+  ctx.fillStyle = fillColor || glow(color, 0.06);
+  ctx.beginPath();
+  ctx.moveTo(x, bodyTop);
+  ctx.lineTo(x, bodyBot);
+  ctx.ellipse(x + ew/2, bodyBot, ew/2, eh/2, 0, Math.PI, 0, true);
+  ctx.lineTo(x + ew, bodyTop);
+  ctx.ellipse(x + ew/2, bodyTop, ew/2, eh/2, 0, 0, Math.PI, true);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = glow(color, 0.4);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // bottom ellipse line
+  ctx.beginPath();
+  ctx.ellipse(x + ew/2, bodyBot, ew/2, eh/2, 0, 0, Math.PI*2);
+  ctx.strokeStyle = glow(color, 0.15);
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+  // top ellipse filled
+  ctx.beginPath();
+  ctx.ellipse(x + ew/2, bodyTop, ew/2, eh/2, 0, 0, Math.PI*2);
+  ctx.fillStyle = glow(color, 0.12);
+  ctx.fill();
+  ctx.strokeStyle = glow(color, 0.4);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawPipe(ctx, x, y, w, h, color){
+  // Horizontal tube/pipe for streaming
+  const r = h/2;
+  ctx.fillStyle = glow(color, 0.06);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arc(x + w - r, y + r, r, -Math.PI/2, Math.PI/2);
+  ctx.lineTo(x + r, y + h);
+  ctx.arc(x + r, y + r, r, Math.PI/2, -Math.PI/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = glow(color, 0.4);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // inner highlight stripe
+  ctx.beginPath();
+  ctx.moveTo(x + r, y + h*0.25);
+  ctx.lineTo(x + w - r, y + h*0.25);
+  ctx.strokeStyle = glow(color, 0.12);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // flow chevrons inside pipe
+  ctx.strokeStyle = glow(color, 0.2);
+  ctx.lineWidth = 1.2;
+  const chevCount = Math.floor((w - r*2) / 30);
+  for(let i = 0; i < chevCount; i++){
+    const cx = x + r + 15 + i * 30;
+    const cy = y + h/2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, cy - 5);
+    ctx.lineTo(cx + 4, cy);
+    ctx.lineTo(cx - 4, cy + 5);
+    ctx.stroke();
+  }
+}
+
+function drawHexagon(ctx, cx, cy, r, color){
+  ctx.beginPath();
+  for(let i = 0; i < 6; i++){
+    const angle = (Math.PI/3)*i - Math.PI/6;
+    const px = cx + r * Math.cos(angle);
+    const py = cy + r * Math.sin(angle);
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = glow(color, 0.06);
+  ctx.fill();
+  ctx.strokeStyle = glow(color, 0.4);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawChip(ctx, x, y, w, h, color){
+  // GPU/chip shape with pins
+  roundRect(ctx, x, y, w, h, 6, glow(color, 0.06), glow(color, 0.4), 1.5);
+  // pins on left
+  const pinCount = 4;
+  const pinGap = h / (pinCount + 1);
+  ctx.strokeStyle = glow(color, 0.3);
+  ctx.lineWidth = 2;
+  for(let i = 1; i <= pinCount; i++){
+    const py = y + pinGap * i;
+    ctx.beginPath(); ctx.moveTo(x - 8, py); ctx.lineTo(x, py); ctx.stroke();
+  }
+  // pins on right
+  for(let i = 1; i <= pinCount; i++){
+    const py = y + pinGap * i;
+    ctx.beginPath(); ctx.moveTo(x + w, py); ctx.lineTo(x + w + 8, py); ctx.stroke();
+  }
+  // pins top
+  const tPinCount = Math.floor(w / 18);
+  const tGap = w / (tPinCount + 1);
+  for(let i = 1; i <= tPinCount; i++){
+    const px = x + tGap * i;
+    ctx.beginPath(); ctx.moveTo(px, y - 8); ctx.lineTo(px, y); ctx.stroke();
+  }
+  // inner die
+  const pad = 10;
+  roundRect(ctx, x+pad, y+pad, w-pad*2, h-pad*2, 3, glow(color, 0.04), glow(color, 0.15), 0.8);
+}
+
+function drawCloud(ctx, cx, cy, w, h, color){
+  const hw = w/2, hh = h/2;
+  ctx.beginPath();
+  ctx.moveTo(cx - hw*0.6, cy + hh*0.5);
+  ctx.bezierCurveTo(cx - hw, cy + hh*0.5, cx - hw, cy - hh*0.2, cx - hw*0.5, cy - hh*0.4);
+  ctx.bezierCurveTo(cx - hw*0.4, cy - hh, cx + hw*0.2, cy - hh, cx + hw*0.3, cy - hh*0.5);
+  ctx.bezierCurveTo(cx + hw*0.7, cy - hh, cx + hw, cy - hh*0.3, cx + hw, cy + hh*0.1);
+  ctx.bezierCurveTo(cx + hw, cy + hh*0.5, cx + hw*0.6, cy + hh*0.5, cx + hw*0.4, cy + hh*0.5);
+  ctx.lineTo(cx - hw*0.6, cy + hh*0.5);
+  ctx.closePath();
+  ctx.fillStyle = glow(color, 0.06);
+  ctx.fill();
+  ctx.strokeStyle = glow(color, 0.4);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawDashboard(ctx, x, y, w, h, color){
+  // Monitor/screen shape for observability
+  roundRect(ctx, x, y, w, h - 12, 6, glow(color, 0.06), glow(color, 0.4), 1.5);
+  // screen inner
+  roundRect(ctx, x+5, y+5, w-10, h-24, 3, glow(color, 0.03), glow(color, 0.1), 0.6);
+  // mini bar charts inside
+  const bw = 5, gap = 3, startX = x + 12, baseY = y + h - 20;
+  const heights = [12, 18, 8, 22, 14, 10, 16, 20, 6, 15];
+  ctx.fillStyle = glow(color, 0.2);
+  heights.forEach((bh, i) => {
+    if(startX + i*(bw+gap) + bw < x + w - 12){
+      ctx.fillRect(startX + i*(bw+gap), baseY - bh, bw, bh);
+    }
+  });
+  // stand
+  ctx.strokeStyle = glow(color, 0.3);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x + w/2, y + h - 12);
+  ctx.lineTo(x + w/2, y + h - 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + w/2 - 14, y + h - 3);
+  ctx.lineTo(x + w/2 + 14, y + h - 3);
+  ctx.stroke();
+}
+
+function drawQueue(ctx, x, y, w, h, color){
+  // Queue: stacked rectangles fanning out
+  const count = 4;
+  for(let i = count - 1; i >= 0; i--){
+    const ox = i * 4;
+    const oy = i * 3;
+    const a = 1 - i * 0.2;
+    roundRect(ctx, x + ox, y - oy, w - ox*2, h, 4,
+      glow(color, 0.04 * a), glow(color, 0.25 * a), 1);
+  }
+  // border on front
+  roundRect(ctx, x, y, w, h, 4, glow(color, 0.07), glow(color, 0.45), 1.5);
+}
+
+function sysLabel(ctx, label, sub, cx, cy, color){
+  ctx.font = '600 11px "IBM Plex Mono", monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, cx, cy - (sub ? 6 : 0));
+  if(sub){
+    ctx.font = '400 9px "Outfit", sans-serif';
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText(sub, cx, cy + 8);
+  }
+}
+
+function drawSystemDesign(ctx, W, H){
+  ctx.clearRect(0,0,W,H);
+  sysRegions = [];
+
+  ctx.fillStyle = COLORS.bgSurface;
+  ctx.fillRect(0,0,W,H);
+
+  // Subtle dot grid
+  ctx.fillStyle = 'rgba(255,255,255,0.025)';
+  for(let gx=20;gx<W;gx+=30) for(let gy=20;gy<H;gy+=30){
+    ctx.beginPath(); ctx.arc(gx,gy,0.6,0,Math.PI*2); ctx.fill();
+  }
+
+  // ── Section dividers ──
+  const section = (label, x, y, color, lineW)=>{
+    ctx.font = '700 9.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, x, y);
+    ctx.strokeStyle = glow(color, 0.15); ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(x, y+5); ctx.lineTo(x+(lineW||180), y+5); ctx.stroke();
+  };
+
+  // ═══════════════════════════════════════
+  // ROW 1: External Sources (clouds) — top
+  // ═══════════════════════════════════════
+  section('EXTERNAL SOURCES', 40, 24, COLORS.emerald);
+
+  drawCloud(ctx, 200, 58, 180, 55, COLORS.emerald);
+  sysLabel(ctx, 'Structured Sources', 'EDR · Firewall · Auth', 200, 58, COLORS.emerald);
+  sysRegions.push({id:'structured', x:110, y:32, w:180, h:52});
+
+  drawCloud(ctx, 440, 58, 200, 55, COLORS.emerald);
+  sysLabel(ctx, 'Unstructured Sources', 'SF · SNOW · Atlassian', 440, 58, COLORS.emerald);
+  sysRegions.push({id:'unstructured', x:340, y:32, w:200, h:52});
+
+  // Receiver Server — below the clouds
+  section('INGESTION', 40, 100, COLORS.blue, 120);
+  roundRect(ctx, 240, 115, 200, 36, 6, glow(COLORS.blue, 0.08), glow(COLORS.blue, 0.35), 1.5);
+  sysLabel(ctx, 'Receiver Server', 'Auth · rate-limit · validate', 340, 133, COLORS.blue);
+  sysRegions.push({id:'receiver', x:240, y:115, w:200, h:36});
+
+  // Sources → Receiver (down arrows)
+  arrow(ctx, 200, 84, 300, 115, glow(COLORS.emerald,0.5), {thick:true});
+  arrow(ctx, 440, 84, 380, 115, glow(COLORS.emerald,0.5), {thick:true});
+
+  // ═══════════════════════════════════════
+  // ROW 2: Streaming Transport (pipes)
+  // ═══════════════════════════════════════
+  section('STREAMING TRANSPORT', 40, 165, COLORS.blue, 220);
+
+  // Main Kafka pipe
+  drawPipe(ctx, 40, 185, 480, 44, COLORS.blue);
+  ctx.font = '600 12px "IBM Plex Mono", monospace';
+  ctx.fillStyle = COLORS.blue; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Apache Kafka', 280, 202);
+  ctx.font = '400 8.5px "Outfit", sans-serif';
+  ctx.fillStyle = COLORS.textDim;
+  ctx.fillText('Landing topic · partitioned by customer_id', 280, 217);
+  sysRegions.push({id:'sys-kafka', x:40, y:185, w:480, h:44});
+
+  // Topic labels below pipe
+  const topics = ['raw-events', 'normalized', 'enriched', 'detections', 'actions'];
+  topics.forEach((t, i) => {
+    const tx = 55 + i * 92;
+    roundRect(ctx, tx, 233, 78, 15, 3, glow(COLORS.blue, 0.06), glow(COLORS.blue, 0.12), 0.5);
+    ctx.fillStyle = glow(COLORS.blue, 0.55);
+    ctx.font = '500 7.5px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(t, tx + 39, 241);
+  });
+
+  // Schema Registry box
+  roundRect(ctx, 560, 185, 140, 38, 6, glow(COLORS.blue, 0.06), glow(COLORS.blue, 0.3), 1.2);
+  ctx.strokeStyle = glow(COLORS.blue, 0.3); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(572,194); ctx.lineTo(572,214); ctx.lineTo(588,214); ctx.lineTo(588,200); ctx.lineTo(582,194); ctx.closePath(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(582,194); ctx.lineTo(582,200); ctx.lineTo(588,200); ctx.stroke();
+  sysLabel(ctx, 'Schema Registry', 'Avro · Protobuf', 640, 204, COLORS.blue);
+  sysRegions.push({id:'sys-schema', x:560, y:185, w:140, h:38});
+
+  // Receiver → Kafka
+  arrow(ctx, 340, 151, 340, 185, COLORS.blue, {thick:true, label:'persist', labelOffX:30});
+  arrow(ctx, 520, 207, 560, 207, COLORS.blue, {label:'validate'});
+
+  // ═══════════════════════════════════════
+  // ROW 3: Compute (hexagons) + ML (chip)
+  // ═══════════════════════════════════════
+  section('COMPUTE', 40, 268, COLORS.purple);
+
+  drawHexagon(ctx, 140, 320, 52, COLORS.purple);
+  sysLabel(ctx, 'Apache Flink', 'Normalize · Enrich · Detect', 140, 320, COLORS.purple);
+  sysRegions.push({id:'sys-flink', x:88, y:268, w:104, h:104});
+
+  section('ML INFRASTRUCTURE', 530, 268, COLORS.red);
+
+  drawChip(ctx, 570, 288, 180, 70, COLORS.red);
+  sysLabel(ctx, 'GPU Inference Fleet', 'Quantized · ONNX/TensorRT', 660, 323, COLORS.red);
+  sysRegions.push({id:'sys-gpu', x:562, y:280, w:196, h:86});
+
+  // Kafka → Flink
+  arrow(ctx, 200, 253, 140, 268, COLORS.blue, {thick:true, label:'consume', labelOffX:-20, labelOffY:2});
+
+  // Flink → GPU inference requests
+  arrow(ctx, 190, 300, 562, 300, COLORS.purple, {dashed:true});
+  ctx.font='400 8px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.textSecondary; ctx.textAlign='center';
+  ctx.fillStyle = COLORS.bgSurface;
+  const irW = ctx.measureText('inference requests').width + 6;
+  ctx.fillRect(360-irW/2, 292, irW, 14);
+  ctx.fillStyle = COLORS.textSecondary;
+  ctx.fillText('inference requests', 360, 302);
+  arrow(ctx, 660, 370, 660, 430, COLORS.red, {dashed:true, label:'model results', labelOffX:40});
+
+  // ═══════════════════════════════════════
+  // ROW 4: Data Stores (cylinders)
+  // ═══════════════════════════════════════
+  section('DATA STORES', 40, 420, COLORS.amber);
+
+  drawCylinder(ctx, 40, 440, 160, 70, COLORS.amber);
+  sysLabel(ctx, 'Graph DB', 'Memgraph (hot) · Neo4j (warm)', 120, 478, COLORS.amber);
+  sysRegions.push({id:'sys-neo4j', x:40, y:440, w:160, h:70});
+
+  drawCylinder(ctx, 240, 440, 150, 70, COLORS.amber);
+  sysLabel(ctx, 'Redis Cluster', 'Baselines · feature store', 315, 478, COLORS.amber);
+  sysRegions.push({id:'sys-redis', x:240, y:440, w:150, h:70});
+
+  drawCylinder(ctx, 430, 440, 170, 70, COLORS.amber);
+  sysLabel(ctx, 'S3 / GCS', 'Parquet · 3 PB/day', 515, 478, COLORS.amber);
+  sysRegions.push({id:'sys-s3', x:430, y:440, w:170, h:70});
+
+  // Flink ↔ DBs
+  arrow(ctx, 120, 372, 120, 440, COLORS.purple, {thick:true, label:'read/write', labelOffX:35});
+  arrow(ctx, 170, 350, 315, 440, COLORS.purple, {dashed:true, label:'features', labelOffY:-8});
+  arrow(ctx, 192, 335, 440, 440, glow(COLORS.amber,0.4), {dashed:true, label:'batch writes', labelOffY:-8, labelOffX:15});
+
+  // GPU → Redis
+  arrow(ctx, 580, 358, 350, 440, COLORS.red, {dashed:true, label:'feature lookup', labelOffY:-8});
+
+  // ═══════════════════════════════════════
+  // SLO TARGET
+  // ═══════════════════════════════════════
+  section('SLO TARGET', 820, 165, COLORS.green, 120);
+  roundRect(ctx, 820, 190, 200, 36, 6, glow(COLORS.green,0.06), glow(COLORS.green,0.2), 0.8);
+  ctx.font='600 9px "IBM Plex Mono",monospace'; ctx.fillStyle=COLORS.green; ctx.textAlign='center';
+  ctx.fillText('P99 detection < 1 second', 920, 212);
+
+  // ═══════════════════════════════════════
+  // OUTPUTS (queues)
+  // ═══════════════════════════════════════
+  section('OUTPUTS', 40, 545, COLORS.emerald);
+
+  drawQueue(ctx, 40, 568, 170, 45, COLORS.emerald);
+  sysLabel(ctx, 'Action Queue', 'Block · Quarantine · Alert', 125, 590, COLORS.emerald);
+  sysRegions.push({id:'action', x:40, y:556, w:170, h:57});
+
+  drawQueue(ctx, 260, 568, 170, 45, COLORS.emerald);
+  sysLabel(ctx, 'Cold Archive', 'Raw logs · Compliance', 345, 590, COLORS.emerald);
+  sysRegions.push({id:'cold', x:260, y:556, w:170, h:57});
+
+  // DB → outputs
+  arrow(ctx, 120, 510, 120, 556, COLORS.amber, {thick:true, label:'detections', labelOffX:35});
+  arrow(ctx, 515, 510, 345, 556, COLORS.amber, {label:'all events', labelOffY:-8});
+
+  // ═══════════════════════════════════════
+  // Data flow summary
+  // ═══════════════════════════════════════
+  roundRect(ctx, 40, 638, 720, 55, 8, glow(COLORS.textDim, 0.03), glow(COLORS.textDim, 0.06), 0.5);
+  ctx.font = '600 9px "IBM Plex Mono", monospace';
+  ctx.fillStyle = COLORS.textDim; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('ARCHITECTURE NOTES', 56, 654);
+  ctx.font = '400 9px "IBM Plex Mono", monospace';
+  const notes = [
+    'DATA FLOW    Sources → Receiver → Kafka → Flink (normalize + detect) → Action',
+    'ENRICHMENT   Flink ↔ Memgraph (hot) + Neo4j (warm) per event',
+    'ML BASELINE  Offline training → Redis baselines → Tier 3 inference',
+    'ASYNC GRAPH  Full-graph analytics run on minute+ cadence',
+  ];
+  notes.forEach((n,i)=>{
+    ctx.fillStyle = i===0 ? COLORS.blue : i===1 ? COLORS.amber : i===2 ? COLORS.red : COLORS.emerald;
+    ctx.fillText(n.slice(0,13), 56, 669 + i*12);
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText(n.slice(13), 56 + ctx.measureText(n.slice(0,13)).width, 669 + i*12);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLICK HANDLING
+// ═══════════════════════════════════════════════════════════
+function handleCanvasClick(e, canvas, regions){
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = 1100 / rect.width;
+  const scaleY = canvas.getAttribute('height') / canvas.getBoundingClientRect().height;
+  // Use the logical coordinate system
+  const mx = (e.clientX - rect.left) * (1100 / rect.width);
+  const my = (e.clientY - rect.top) * (880 / rect.height);
+  for(const r of regions){
+    if(mx >= r.x && mx <= r.x+r.w && my >= r.y && my <= r.y+r.h){
+      openModal(r.id);
+      return;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════════════
+const flowCanvas = document.getElementById('flowCanvas');
+const sysCanvas = document.getElementById('sysCanvas');
+
+function resizeCanvases(){
+  const w = document.querySelector('.canvas-wrap').clientWidth;
+  // flow
+  flowCanvas.style.width = w + 'px';
+  flowCanvas.style.height = (w * 880/1100) + 'px';
+  flowCanvas.width = 1100;
+  flowCanvas.height = 880;
+  // sys
+  sysCanvas.style.width = w + 'px';
+  sysCanvas.style.height = (w * 730/1100) + 'px';
+  sysCanvas.width = 1100;
+  sysCanvas.height = 730;
+}
+
+resizeCanvases();
+window.addEventListener('resize', ()=>{
+  resizeCanvases();
+  drawSystemDesign(sysCanvas.getContext('2d'), 1100, 730);
+});
+
+flowCanvas.addEventListener('click', e => handleCanvasClick(e, flowCanvas, flowRegions));
+sysCanvas.addEventListener('click', e => handleCanvasClick(e, sysCanvas, sysRegions));
+
+// Cursor
+[flowCanvas, sysCanvas].forEach(c=>{
+  c.addEventListener('mousemove', e=>{
+    const rect = c.getBoundingClientRect();
+    const mx = (e.clientX-rect.left)*(1100/rect.width);
+    const my = (e.clientY-rect.top)*((c===flowCanvas?880:730)/rect.height);
+    const regions = c===flowCanvas ? flowRegions : sysRegions;
+    let hit = false;
+    for(const r of regions){
+      if(mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h){ hit=true; break; }
+    }
+    c.style.cursor = hit ? 'pointer' : 'default';
+  });
+});
+
+// Draw system view once
+drawSystemDesign(sysCanvas.getContext('2d'), 1100, 730);
+
+// Animation loop
+spawnParticles();
+respawnLoop();
+
+function animate(t){
+  const dt = Math.min((t - lastTime)/1000, 0.05);
+  lastTime = t;
+
+  if(currentView === 'flow'){
+    const ctx = flowCanvas.getContext('2d');
+    drawFlowStatic(ctx, 1100, 880);
+    particles.forEach(p => { p.update(dt); p.draw(ctx); });
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame((t)=>{ lastTime = t; animate(t); });
+</script>
+</body>
+</html>
